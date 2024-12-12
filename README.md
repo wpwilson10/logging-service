@@ -8,6 +8,10 @@ This project implements a REST endpoint allowing clients to remotely log message
 
 This project is intended to be intergrated with the AWS Infrastructure provisioned from [WpwilsonSite](https://github.com/wpwilson10/WpwilsonSite), but can be used with any AWS environment with an HTTP API Gateway.
 
+The architecture for this project follows [AWS's RESTful microservices scenario](https://docs.aws.amazon.com/wellarchitected/latest/serverless-applications-lens/restful-microservices.html) which is a serverless application framework and part of AWS's recommended Well-Architected Framework. By using an API Gateway which calls Lambda functions, this solution is scalable, distributed, and fault-tolerant by default.
+
+![Architecture](./diagram.svg)
+
 ## Setup
 
 ### Configuration

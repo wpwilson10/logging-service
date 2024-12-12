@@ -5,72 +5,84 @@ import boto3
 import time
 import logging
 
-
 # Logger for debugging
 logger: logging.Logger = logging.getLogger()
 logger.setLevel(level=logging.INFO)
 
+# Initialize CloudWatch Logs client and SNS client
+# Done globally allowing more efficient subsequent invocations/warn starts
+cloudwatch_logs_client = boto3.client(service_name="logs")
+sns_client = boto3.client(service_name="sns")
 
-def log_to_cloudwatch(message: str, level: str) -> None:
+# Load environment variables
+LOG_GROUP_NAME = os.environ.get("LOG_GROUP_NAME", "Default_Group")
+LOG_STREAM_NAME = os.environ.get("LOG_STREAM_NAME", "Default_Stream")
+SNS_TOPIC_ARN = os.environ.get("SNS_TOPIC_ARN", "Default_Topic")
+SECRET_TOKEN = os.environ.get("SECRET_TOKEN", "default-secret-token")
+
+
+def log_to_cloudwatch(log_entry: dict[str, Any]) -> None:
     """
-    Sends a log entry to CloudWatch Logs.
+    Sends a structured log entry to CloudWatch Logs.
 
     Args:
-        message (str): The log message.
-        level (str): The log level (e.g., INFO, ERROR).
+        log_entry (dict): The log entry in structured JSON format.
     """
-    log_event: dict[str, Any] = {
-        "timestamp": int(time.time() * 1000),  # Milliseconds since epoch
-        "message": f"{level} | {message}",
-    }
-
     try:
-        # Set up the boto3 client for CloudWatch Logs
-        cloudwatch_logs_client = boto3.client(service_name="logs")
+        # Construct the log event with timestamp and message
+        log_event: dict[str, Any] = {
+            "timestamp": int(time.time() * 1000),  # Milliseconds since epoch
+            "message": json.dumps(log_entry),  # Convert dict to JSON string for logging
+        }
 
-        # Construct the put_log_events request
+        # Send the log event to CloudWatch
         kwargs: dict[str, Any] = {
-            "logGroupName": os.environ.get("LOG_GROUP_NAME", default="Default_Group"),
-            "logStreamName": os.environ.get(
-                "LOG_STREAM_NAME", default="Default_Stream"
-            ),
+            "logGroupName": LOG_GROUP_NAME,
+            "logStreamName": LOG_STREAM_NAME,
             "logEvents": [log_event],
         }
 
-        # Send the log event
         cloudwatch_logs_client.put_log_events(**kwargs)
 
     except Exception as e:
         logger.error(msg=f"Failed to send log to CloudWatch: {e}")
 
 
-def notify_error_SNS(message: str, level: str) -> None:
+def notify_error_sns(log_entry: dict[str, Any]) -> None:
     """
-    Sends the log message via an SNS notification if the level is ERROR or FATAL
+    Sends an SNS notification if the log level is ERROR or FATAL.
+    This version dynamically checks for existing fields in the log entry and formats them into a message.
 
     Args:
-        message (str): The log message.
-        level (str): The log level (e.g., INFO, ERROR).
+        log_entry (dict): The log entry containing the message and level.
     """
-    if level not in ("ERROR", "FATAL"):
+    # Check if the level is ERROR or FATAL
+    level = log_entry.get("level", "").upper()
+    if level not in ["ERROR", "FATAL"]:
         return
 
     try:
-        # Read environment variables
-        SNS_TOPIC_ARN: str = os.environ.get("SNS_TOPIC_ARN", default="Default_Topic")
-        AWS_REGION: str = os.environ.get("AWS_REGION", default="us-east-1")
+        # Dynamically format the log entry into a human-readable message
+        message_parts: list[str] = []
 
-        # Initialize the SNS client
-        sns_client = boto3.client(service_name="sns", region_name=AWS_REGION)
+        # Loop through the log entry and include only the fields that exist
+        for key, value in log_entry.items():
+            if value:  # Only include non-empty fields
+                # Format each field as "Key: Value"
+                message_parts.append(f"{key.replace('_', ' ').title()}: {value}")
 
-        # Send the message
+        # Join all the parts into a single string, each part on a new line
+        message: str = "\n".join(message_parts)
+
+        # Send the SNS notification with the formatted message
         sns_client.publish(
             TopicArn=SNS_TOPIC_ARN,
-            Subject="AWS Service Error Notification",
-            Message=message,
+            Subject=f"AWS Service {log_entry['level']} Notification",
+            Message=message,  # Send the formatted message
         )
+
     except Exception as e:
-        logger.error(msg=f"Error sending SNS message: {e}")
+        logger.error(f"Error sending SNS message: {e}")
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -89,18 +101,16 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     token = headers.get("x-custom-auth")
 
     # Validate the token
-    if token != os.environ.get("SECRET_TOKEN"):
+    if token != SECRET_TOKEN:
         logger.info(msg="Denied unauthorized request")
         return {"statusCode": 403, "body": "Unauthorized"}
 
     # Parse the incoming request body
     try:
         body = json.loads(event.get("body", "{}"))
-        message = body.get("message", "No message provided")
-        level = body.get("level", "INFO").upper()
 
-        log_to_cloudwatch(message=message, level=level)
-        notify_error_SNS(message=message, level=level)
+        log_to_cloudwatch(body)
+        notify_error_sns(body)
 
         return {
             "statusCode": 200,

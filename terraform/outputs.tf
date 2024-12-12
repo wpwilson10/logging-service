@@ -1,4 +1,4 @@
-output "lambda_function_url" {
-  description = "URL to use as AWS_LOG_URL in the microcontroller's config.py"
-  value       = module.logger_lambda.lambda_function_url
+output "logging_endpoint" {
+  description = "URL of the logging API"
+  value       = "${data.aws_apigatewayv2_api.this.api_endpoint}/${var.api_route}"
 }

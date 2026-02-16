@@ -46,3 +46,15 @@ variable "sns_destination_email" {
   type        = string
 }
 
+variable "log_group_prefix" {
+  description = "CloudWatch log group prefix for per-service routing"
+  type        = string
+  default     = "/wpwilson"
+}
+
+variable "known_services" {
+  description = "List of known service names to pre-create log groups for"
+  type        = list(string)
+  default     = ["wpwilsonsite", "sunrise-lamp-aws"]
+}
+

@@ -12,19 +12,17 @@ resource "aws_sns_topic_subscription" "this" {
   endpoint  = var.sns_destination_email
 }
 
-#####################################################################
-# CloudWatch Logs - stores logs messages received by Lambda endpoint
-#####################################################################
+###########################################################################
+# CloudWatch Logs - per-service log groups; streams created by Lambda
+###########################################################################
 
-resource "aws_cloudwatch_log_group" "this" {
-  name              = "${var.project_name}-Group"
+resource "aws_cloudwatch_log_group" "service" {
+  for_each          = toset(var.known_services)
+  name              = "${var.log_group_prefix}/${each.value}"
   retention_in_days = 90
 }
 
-resource "aws_cloudwatch_log_stream" "this" {
-  name           = "${var.project_name}-Stream"
-  log_group_name = aws_cloudwatch_log_group.this.name
-}
+data "aws_caller_identity" "current" {}
 
 ##################################################################################################
 # Lambda function - Saving log messages from clients to CW Logs and triggering SNS for error logs
@@ -45,10 +43,10 @@ module "logger_lambda" {
 
   # matches variables used in function code
   environment_variables = {
-    LOG_GROUP_NAME  = aws_cloudwatch_log_group.this.name
-    LOG_STREAM_NAME = aws_cloudwatch_log_stream.this.name
-    SNS_TOPIC_ARN   = aws_sns_topic.this.arn
-    SECRET_TOKEN    = var.secret_token
+    LOG_GROUP_PREFIX = var.log_group_prefix
+    RETENTION_DAYS   = "90"
+    SNS_TOPIC_ARN    = aws_sns_topic.this.arn
+    SECRET_TOKEN     = var.secret_token
   }
 
   # allow API Gateway to call the function
@@ -62,10 +60,17 @@ module "logger_lambda" {
   # permissions for saving logs to our CW Logs and publish messages via SNS
   attach_policy_statements = true
   policy_statements = {
-    logs_put = {
-      effect    = "Allow",
-      actions   = ["logs:PutLogEvents"],
-      resources = [local.cw_logs_full_arn]
+    logs_manage = {
+      effect = "Allow",
+      actions = [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+        "logs:PutRetentionPolicy"
+      ],
+      resources = [
+        "arn:aws:logs:${var.region}:${data.aws_caller_identity.current.account_id}:log-group:${var.log_group_prefix}/*"
+      ]
     },
     sns_publish = {
       effect    = "Allow",

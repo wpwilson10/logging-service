@@ -30,7 +30,7 @@ data "aws_caller_identity" "current" {}
 
 module "logger_lambda" {
   source        = "terraform-aws-modules/lambda/aws"
-  version       = "7.17.0"
+  version       = "7.20.0"
   handler       = local.lambda_handler
   runtime       = local.lambda_runtime
   architectures = local.lambda_architecture
